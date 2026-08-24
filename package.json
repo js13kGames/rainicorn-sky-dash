@@ -1,0 +1,21 @@
+{
+  "name": "over-the-rainbow",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "clean": "rm -rf dist over-the-rainbow.zip node_modules/.vite",
+    "build": "tsc && vite build",
+    "build:zip": "npm run build && zip -r -q over-the-rainbow.zip dist",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "terser": "^5.50.0",
+    "typescript": "~6.0.2",
+    "vite": "^8.2.0"
+  },
+  "dependencies": {
+    "kontra": "^10.0.2"
+  }
+}
