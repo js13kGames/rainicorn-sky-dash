@@ -1,5 +1,3 @@
-import { GameLoop, Text, init, initKeys, keyPressed } from 'kontra'
-
 const RAINBOW = ['#ff2d2d', '#ff8c00', '#ffd700', '#2ecc71', '#1e90ff', '#8b5cf6']
 const BAND_SPACING = 9
 const BAND_WIDTH = 8
@@ -32,12 +30,23 @@ const STAR_LAYERS = [
 ]
 
 export function startGame() {
-  const canvasEl = document.getElementById('game') as HTMLCanvasElement
-  canvasEl.width = window.innerWidth
-  canvasEl.height = window.innerHeight
+  const canvas = document.getElementById('game') as HTMLCanvasElement
+  canvas.width = window.innerWidth
+  canvas.height = window.innerHeight
 
-  const { canvas, context } = init('game')
-  initKeys()
+  const context = canvas.getContext('2d')!
+
+  let spaceDown = false
+  addEventListener('keydown', (e) => {
+    if (e.code === 'Space') {
+      spaceDown = true
+      e.preventDefault()
+    }
+  })
+  addEventListener('keyup', (e) => {
+    if (e.code === 'Space') spaceDown = false
+  })
+  addEventListener('blur', () => (spaceDown = false))
 
   const groundY = Math.floor(canvas.height * 0.72)
   const restY = groundY - HERO_GROUND_GAP
@@ -79,32 +88,6 @@ export function startGame() {
     }
   }
   let starScroll = 0
-
-  const score = Text({
-    text: '0 m',
-    font: 'bold 20px system-ui, sans-serif',
-    color: 'rgba(255, 255, 255, 0.85)',
-    x: 20,
-    y: 18,
-  })
-
-  const hint = Text({
-    text: 'Press SPACE to jump',
-    font: '14px system-ui, sans-serif',
-    color: 'rgba(255, 255, 255, 0.6)',
-    x: canvas.width / 2,
-    y: canvas.height - 16,
-    anchor: { x: 0.5, y: 1 },
-  })
-
-  const gameOverText = Text({
-    text: 'Game Over - press SPACE to restart',
-    font: 'bold 30px system-ui, sans-serif',
-    color: '#ffffff',
-    x: canvas.width / 2,
-    y: canvas.height / 2 - 60,
-    anchor: { x: 0.5, y: 0.5 },
-  })
 
   function rand(min: number, max: number) {
     return min + Math.random() * (max - min)
@@ -149,7 +132,6 @@ export function startGame() {
     hero.y = restY
     hero.vy = 0
     hero.airborne = false
-    score.text = '0 m'
     trailPts.length = 0
   }
 
@@ -268,22 +250,38 @@ export function startGame() {
     context.stroke()
   }
 
-  const loop = GameLoop({
-    update(dtRaw: number) {
-      const dt = Math.min(dtRaw, 1 / 30)
-      const spaceDown = keyPressed('space')
+  function drawHud() {
+    context.textAlign = 'left'
+    context.textBaseline = 'top'
+    context.font = 'bold 20px system-ui, sans-serif'
+    context.fillStyle = 'rgba(255, 255, 255, 0.85)'
+    context.fillText(`${Math.floor(distance / 10)} m`, 20, 18)
 
-      if (state === 'over') {
-        if (spaceDown && !spaceWasDown) reset()
-        spaceWasDown = spaceDown
-        return
-      }
+    context.textAlign = 'center'
+    context.textBaseline = 'alphabetic'
+    context.font = '14px system-ui, sans-serif'
+    context.fillStyle = 'rgba(255, 255, 255, 0.6)'
+    context.fillText('Press SPACE to jump', canvas.width / 2, canvas.height - 16)
 
-      if (spaceDown && !spaceWasDown && !hero.airborne) {
-        hero.vy = JUMP_VELOCITY
-        hero.airborne = true
-      }
+    if (state === 'over') {
+      context.font = 'bold 30px system-ui, sans-serif'
+      context.fillStyle = '#ffffff'
+      context.fillText('Game Over - press SPACE to restart', canvas.width / 2, canvas.height / 2 - 60)
+    }
+  }
+
+  function update(dt: number) {
+    if (state === 'over') {
+      if (spaceDown && !spaceWasDown) reset()
       spaceWasDown = spaceDown
+      return
+    }
+
+    if (spaceDown && !spaceWasDown && !hero.airborne) {
+      hero.vy = JUMP_VELOCITY
+      hero.airborne = true
+    }
+    spaceWasDown = spaceDown
 
       speed = BASE_SPEED + Math.min(MAX_SPEED_BONUS, distance * 0.006)
       const dx = speed * dt
@@ -301,7 +299,6 @@ export function startGame() {
       distance += dx
       scrollX += dx
       starScroll += dx
-      score.text = `${Math.floor(distance / 10)} m`
 
       trailPts.push({ x: distance + hero.x, y: hero.y })
       while (trailPts.length > 2 && trailPts[trailPts.length - 1].x - trailPts[0].x > TRAIL_LENGTH) {
@@ -330,26 +327,32 @@ export function startGame() {
           break
         }
       }
-    },
-    render() {
-      context.fillStyle = '#1b1035'
-      context.fillRect(0, 0, canvas.width, canvas.height)
+  }
 
-      renderStars()
-      drawTrail()
+  function render() {
+    context.fillStyle = '#1b1035'
+    context.fillRect(0, 0, canvas.width, canvas.height)
 
-      renderGround()
-      for (const o of obstacles) {
-        context.fillStyle = o.color
-        context.fillRect(o.x, o.y, o.w, o.h)
-      }
+    renderStars()
+    drawTrail()
 
-      renderPlayer()
-      score.render()
-      hint.render()
-      if (state === 'over') gameOverText.render()
-    },
-  })
+    renderGround()
+    for (const o of obstacles) {
+      context.fillStyle = o.color
+      context.fillRect(o.x, o.y, o.w, o.h)
+    }
 
-  loop.start()
+    renderPlayer()
+    drawHud()
+  }
+
+  let last = performance.now()
+  function tick(now: number) {
+    const dt = Math.min((now - last) / 1000, 1 / 30)
+    last = now
+    update(dt)
+    render()
+    requestAnimationFrame(tick)
+  }
+  requestAnimationFrame(tick)
 }

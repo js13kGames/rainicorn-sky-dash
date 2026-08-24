@@ -146,11 +146,6 @@ fsevents@~2.3.3:
   resolved "https://registry.yarnpkg.com/fsevents/-/fsevents-2.3.3.tgz#cac6407785d03675a2a5e1a5305c697b347d90d6"
   integrity sha512-5xoDfX+fL7faATnagmWPpbFtwh/R77WmMMqqHGS65C3vvB0YHrgF+B1YmZ3441tMj5n63k0212XNoJwzlhffQw==
 
-kontra@^10.0.2:
-  version "10.0.2"
-  resolved "https://registry.yarnpkg.com/kontra/-/kontra-10.0.2.tgz#699dda8c976a7e58dbd517de45ad40081d620788"
-  integrity sha512-NJfxmWtwDi1rWjj/fhOVwW4txjEVsDNgNNHNzc87YnsN7qZlZlkLQ0mWt7SN6WEAMH2KmX4evgL3Cmc2zVOXvQ==
-
 lightningcss-android-arm64@1.33.0:
   version "1.33.0"
   resolved "https://registry.yarnpkg.com/lightningcss-android-arm64/-/lightningcss-android-arm64-1.33.0.tgz#9a6841f88ae50fc83502903892b41af41bc2b907"
