@@ -11,6 +11,8 @@ const HERO_GROUND_GAP = 18
 
 type Obstacle = { x: number; y: number; w: number; h: number; color: string }
 type Pt = { x: number; y: number }
+type Projectile = { x: number; y: number; vx: number; vy: number; life: number }
+type Particle = { x: number; y: number; vx: number; vy: number; life: number; color: string }
 type Star = {
   x: number
   y: number
@@ -33,10 +35,14 @@ export function startGame() {
   const canvas = document.getElementById('game') as HTMLCanvasElement
   canvas.width = window.innerWidth
   canvas.height = window.innerHeight
+  canvas.style.cursor = 'none'
 
   const context = canvas.getContext('2d')!
 
   let spaceDown = false
+  let mouseDown = false
+  let mouseX = canvas.width / 2
+  let mouseY = canvas.height / 2
   addEventListener('keydown', (e) => {
     if (e.code === 'Space') {
       spaceDown = true
@@ -46,7 +52,22 @@ export function startGame() {
   addEventListener('keyup', (e) => {
     if (e.code === 'Space') spaceDown = false
   })
-  addEventListener('blur', () => (spaceDown = false))
+  addEventListener('blur', () => {
+    spaceDown = false
+    mouseDown = false
+  })
+
+  canvas.addEventListener('mousemove', (e) => {
+    mouseX = e.clientX
+    mouseY = e.clientY
+  })
+  canvas.addEventListener('mousedown', (e) => {
+    if (e.button === 0) mouseDown = true
+  })
+  canvas.addEventListener('mouseup', (e) => {
+    if (e.button === 0) mouseDown = false
+  })
+  canvas.addEventListener('contextmenu', (e) => e.preventDefault())
 
   const groundY = Math.floor(canvas.height * 0.72)
   const restY = groundY - HERO_GROUND_GAP
@@ -69,6 +90,12 @@ export function startGame() {
 
   const obstacles: Obstacle[] = []
   const trailPts: Pt[] = []
+  const projectiles: Projectile[] = []
+  const particles: Particle[] = []
+  let shootCooldown = 0
+  const SHOOT_INTERVAL = 0.18
+  const PROJECTILE_SPEED = 650
+  const PROJECTILE_RADIUS = 5
 
   const stars: Star[] = []
   for (const layer of STAR_LAYERS) {
@@ -129,6 +156,9 @@ export function startGame() {
     spawnTimer = 1.2
     colorIndex = 0
     obstacles.length = 0
+    projectiles.length = 0
+    particles.length = 0
+    shootCooldown = 0
     hero.y = restY
     hero.vy = 0
     hero.airborne = false
@@ -231,6 +261,26 @@ export function startGame() {
     context.restore()
   }
 
+  function renderCrosshair() {
+    context.save()
+    context.translate(mouseX, mouseY)
+    context.strokeStyle = 'rgba(255, 255, 255, 0.8)'
+    context.lineWidth = 2
+    const s = 12
+    const g = 4
+    context.beginPath()
+    context.moveTo(-s, 0); context.lineTo(-g, 0)
+    context.moveTo(g, 0); context.lineTo(s, 0)
+    context.moveTo(0, -s); context.lineTo(0, -g)
+    context.moveTo(0, g); context.lineTo(0, s)
+    context.stroke()
+    context.beginPath()
+    context.arc(0, 0, 3, 0, Math.PI * 2)
+    context.fillStyle = '#ff2d2d'
+    context.fill()
+    context.restore()
+  }
+
   function renderGround() {
     context.strokeStyle = 'rgba(255, 255, 255, 0.28)'
     context.lineWidth = 2
@@ -261,7 +311,7 @@ export function startGame() {
     context.textBaseline = 'alphabetic'
     context.font = '14px system-ui, sans-serif'
     context.fillStyle = 'rgba(255, 255, 255, 0.6)'
-    context.fillText('Press SPACE to jump', canvas.width / 2, canvas.height - 16)
+    context.fillText('SPACE to jump \u00b7 Click to shoot', canvas.width / 2, canvas.height - 16)
 
     if (state === 'over') {
       context.font = 'bold 30px system-ui, sans-serif'
@@ -282,6 +332,63 @@ export function startGame() {
       hero.airborne = true
     }
     spaceWasDown = spaceDown
+
+    const aimDx = mouseX - hero.x
+    const aimDy = mouseY - hero.y
+    hero.angle = Math.atan2(aimDy, aimDx)
+
+    shootCooldown -= dt
+    if (mouseDown && shootCooldown <= 0) {
+      shootCooldown = SHOOT_INTERVAL
+      const a = Math.atan2(aimDy, aimDx)
+      projectiles.push({
+        x: hero.x,
+        y: hero.y,
+        vx: Math.cos(a) * PROJECTILE_SPEED,
+        vy: Math.sin(a) * PROJECTILE_SPEED,
+        life: 1.2,
+      })
+    }
+
+    for (let i = projectiles.length - 1; i >= 0; i--) {
+      const p = projectiles[i]
+      p.x += p.vx * dt
+      p.y += p.vy * dt
+      p.life -= dt
+      if (p.life <= 0) { projectiles.splice(i, 1); continue }
+
+      for (let j = obstacles.length - 1; j >= 0; j--) {
+        const o = obstacles[j]
+        const cx = Math.max(o.x, Math.min(p.x, o.x + o.w))
+        const cy = Math.max(o.y, Math.min(p.y, o.y + o.h))
+        const ddx = p.x - cx
+        const ddy = p.y - cy
+        if (ddx * ddx + ddy * ddy < PROJECTILE_RADIUS * PROJECTILE_RADIUS) {
+          for (let k = 0; k < 12; k++) {
+            const a = Math.random() * Math.PI * 2
+            const sp = rand(80, 220)
+            particles.push({
+              x: cx, y: cy,
+              vx: Math.cos(a) * sp, vy: Math.sin(a) * sp,
+              life: rand(0.3, 0.7),
+              color: o.color,
+            })
+          }
+          obstacles.splice(j, 1)
+          projectiles.splice(i, 1)
+          break
+        }
+      }
+    }
+
+    for (let i = particles.length - 1; i >= 0; i--) {
+      const p = particles[i]
+      p.x += p.vx * dt
+      p.y += p.vy * dt
+      p.vy += 400 * dt
+      p.life -= dt
+      if (p.life <= 0) particles.splice(i, 1)
+    }
 
       speed = BASE_SPEED + Math.min(MAX_SPEED_BONUS, distance * 0.006)
       const dx = speed * dt
@@ -342,7 +449,28 @@ export function startGame() {
       context.fillRect(o.x, o.y, o.w, o.h)
     }
 
+    for (const p of projectiles) {
+      context.fillStyle = '#ffffff'
+      context.beginPath()
+      context.arc(p.x, p.y, 4, 0, Math.PI * 2)
+      context.fill()
+      context.fillStyle = 'rgba(255, 200, 60, 0.5)'
+      context.beginPath()
+      context.arc(p.x, p.y, 7, 0, Math.PI * 2)
+      context.fill()
+    }
+
+    for (const p of particles) {
+      context.globalAlpha = Math.max(0, p.life * 2)
+      context.fillStyle = p.color
+      context.beginPath()
+      context.arc(p.x, p.y, 3, 0, Math.PI * 2)
+      context.fill()
+    }
+    context.globalAlpha = 1
+
     renderPlayer()
+    renderCrosshair()
     drawHud()
   }
 
