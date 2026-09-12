@@ -1,13 +1,13 @@
 {
-  "name": "over-the-rainbow",
+  "name": "rainicorn-sky-dash",
   "private": true,
   "version": "0.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "clean": "rm -rf dist over-the-rainbow.zip node_modules/.vite",
+    "clean": "rm -rf dist rainicorn-sky-dash.zip node_modules/.vite",
     "build": "tsc && vite build",
-    "build:zip": "npm run build && zip -r -q over-the-rainbow.zip dist",
+    "build:zip": "npm run build && zip -r -q rainicorn-sky-dash.zip dist",
     "preview": "vite preview"
   },
   "devDependencies": {
