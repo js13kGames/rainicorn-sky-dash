@@ -1,16 +1,28 @@
+import unicornSheet from './assets/unicorn.png'
+
 const RAINBOW = ['#ff2d2d', '#ff8c00', '#ffd700', '#2ecc71', '#1e90ff', '#8b5cf6']
 const BAND_SPACING = 9
 const BAND_WIDTH = 8
 
-const BASE_SPEED = 340
-const MAX_SPEED_BONUS = 260
+const RUN_SPEED = 420
+const SPRITE = new Image()
+SPRITE.src = unicornSheet
+const SPRITE_SIZE = 32
+const SPRITE_SCALE = 4
+const RUN_FRAME_START = 0
+const RUN_FRAME_COUNT = 4
+const JUMP_FRAME_START = 4
+const JUMP_FRAME_COUNT = 6
+const IDLE_FRAME = 10
+
 const GRAVITY = 2900
 const JUMP_VELOCITY = -1000
+const JUMP_DURATION = (2 * Math.abs(JUMP_VELOCITY)) / GRAVITY
 const HERO_RADIUS = 14
 const HERO_GROUND_GAP = 18
 
 type Obstacle = { x: number; y: number; w: number; h: number; color: string }
-type Pt = { x: number; y: number }
+type TrailPt = { x: number; y: number; age: number }
 type Projectile = { x: number; y: number; vx: number; vy: number; life: number }
 type Particle = { x: number; y: number; vx: number; vy: number; life: number; color: string }
 type Star = {
@@ -23,7 +35,7 @@ type Star = {
   phase: number
 }
 
-const TRAIL_LENGTH = 500
+const TRAIL_LIFETIME = 1.6
 
 const STAR_LAYERS = [
   { factor: 0.12, count: 45, rMin: 0.5, rMax: 1.1 },
@@ -39,21 +51,19 @@ export function startGame() {
 
   const context = canvas.getContext('2d')!
 
-  let spaceDown = false
+  let keys = new Set<string>()
   let mouseDown = false
   let mouseX = canvas.width / 2
   let mouseY = canvas.height / 2
   addEventListener('keydown', (e) => {
-    if (e.code === 'Space') {
-      spaceDown = true
-      e.preventDefault()
-    }
+    keys.add(e.code)
+    if (e.code === 'KeyW' || e.code === 'ArrowUp') e.preventDefault()
   })
   addEventListener('keyup', (e) => {
-    if (e.code === 'Space') spaceDown = false
+    keys.delete(e.code)
   })
   addEventListener('blur', () => {
-    spaceDown = false
+    keys.clear()
     mouseDown = false
   })
 
@@ -75,21 +85,23 @@ export function startGame() {
   const hero = {
     x: canvas.width / 2,
     y: restY,
+    vx: 0,
     vy: 0,
     airborne: false,
-    angle: 0,
+    facing: 1,
   }
 
   let state: 'running' | 'over' = 'running'
-  let speed = BASE_SPEED
   let distance = 0
   let scrollX = 0
   let spawnTimer = 1.2
   let colorIndex = 0
-  let spaceWasDown = false
+  let wWasDown = false
+  let animTime = 0
+  let airTime = 0
 
   const obstacles: Obstacle[] = []
-  const trailPts: Pt[] = []
+  const trailPts: TrailPt[] = []
   const projectiles: Projectile[] = []
   const particles: Particle[] = []
   let shootCooldown = 0
@@ -150,7 +162,6 @@ export function startGame() {
 
   function reset() {
     state = 'running'
-    speed = BASE_SPEED
     distance = 0
     scrollX = 0
     spawnTimer = 1.2
@@ -159,9 +170,15 @@ export function startGame() {
     projectiles.length = 0
     particles.length = 0
     shootCooldown = 0
+    hero.x = canvas.width / 2
     hero.y = restY
+    hero.vx = 0
     hero.vy = 0
     hero.airborne = false
+    hero.facing = 1
+    wWasDown = false
+    animTime = 0
+    airTime = 0
     trailPts.length = 0
   }
 
@@ -186,12 +203,11 @@ export function startGame() {
   }
 
   function drawTrail() {
-    const n = trailPts.length
-    if (n < 3) return
+    const pts = trailPts
+    const n = pts.length
+    if (n < 2) return
 
     const mid = (RAINBOW.length - 1) / 2
-    const tailX = trailPts[0].x - distance
-    const headX = trailPts[n - 1].x - distance
 
     context.save()
     context.beginPath()
@@ -202,18 +218,14 @@ export function startGame() {
 
     for (let i = 0; i < RAINBOW.length; i++) {
       const offset = (i - mid) * BAND_SPACING
-      const grad = context.createLinearGradient(tailX, 0, headX, 0)
-      grad.addColorStop(0, withAlpha(RAINBOW[i], 0))
-      grad.addColorStop(1, withAlpha(RAINBOW[i], 1))
-      context.strokeStyle = grad
       context.lineWidth = BAND_WIDTH
 
       const xs: number[] = []
       const ys: number[] = []
       for (let j = 0; j < n; j++) {
-        const p = trailPts[j]
-        const a = trailPts[Math.max(j - 1, 0)]
-        const b = trailPts[Math.min(j + 1, n - 1)]
+        const p = pts[j]
+        const a = pts[Math.max(j - 1, 0)]
+        const b = pts[Math.min(j + 1, n - 1)]
         let tx = b.x - a.x
         let ty = b.y - a.y
         const tl = Math.hypot(tx, ty)
@@ -224,40 +236,52 @@ export function startGame() {
           tx = 1
           ty = 0
         }
-        xs.push(p.x - distance - ty * offset)
+        xs.push(p.x - ty * offset)
         ys.push(p.y + tx * offset)
       }
 
-      context.beginPath()
-      context.moveTo(xs[0], ys[0])
-      for (let j = 1; j < n - 1; j++) {
-        context.quadraticCurveTo(xs[j], ys[j], (xs[j] + xs[j + 1]) / 2, (ys[j] + ys[j + 1]) / 2)
+      for (let j = 0; j < n - 1; j++) {
+        const age = Math.max(pts[j].age, pts[j + 1].age)
+        const alpha = Math.max(0, 1 - age / TRAIL_LIFETIME)
+        context.strokeStyle = withAlpha(RAINBOW[i], alpha)
+        context.beginPath()
+        context.moveTo(xs[j], ys[j])
+        context.lineTo(xs[j + 1], ys[j + 1])
+        context.stroke()
       }
-      context.lineTo(xs[n - 1], ys[n - 1])
-      context.stroke()
     }
 
     context.restore()
   }
 
   function renderPlayer() {
+    const scale = SPRITE_SIZE * SPRITE_SCALE
+    const half = scale / 2
     context.save()
     context.translate(hero.x, hero.y)
-    context.rotate(hero.angle)
-    for (let i = 0; i < RAINBOW.length; i++) {
-      context.beginPath()
-      context.arc(0, 0, 16 - i * 1.5, 0, Math.PI * 2)
-      context.strokeStyle = RAINBOW[i]
-      context.lineWidth = 3
-      context.stroke()
+    if (hero.facing < 0) context.scale(-1, 1)
+    let frame = IDLE_FRAME
+    if (hero.airborne) {
+      const p = Math.min(1, airTime / JUMP_DURATION)
+      frame =
+        JUMP_FRAME_START + Math.round(p * (JUMP_FRAME_COUNT - 1))
+    } else if (hero.vx !== 0) {
+      const speedBoost = Math.min(1, Math.abs(hero.vx) / RUN_SPEED) * 6
+      frame =
+        RUN_FRAME_START +
+        (Math.floor(animTime * (9 + speedBoost)) % RUN_FRAME_COUNT)
     }
-    context.fillStyle = '#ffffff'
-    context.beginPath()
-    context.moveTo(22, 0)
-    context.lineTo(-10, -9)
-    context.lineTo(-10, 9)
-    context.closePath()
-    context.fill()
+    context.drawImage(
+      SPRITE,
+      frame * SPRITE_SIZE,
+      0,
+      SPRITE_SIZE,
+      SPRITE_SIZE,
+      -half,
+      -half,
+      scale,
+      scale,
+    )
     context.restore()
   }
 
@@ -311,31 +335,45 @@ export function startGame() {
     context.textBaseline = 'alphabetic'
     context.font = '14px system-ui, sans-serif'
     context.fillStyle = 'rgba(255, 255, 255, 0.6)'
-    context.fillText('SPACE to jump \u00b7 Click to shoot', canvas.width / 2, canvas.height - 16)
+    context.fillText('W jump \u00b7 A/D move \u00b7 Click shoot', canvas.width / 2, canvas.height - 16)
 
     if (state === 'over') {
       context.font = 'bold 30px system-ui, sans-serif'
       context.fillStyle = '#ffffff'
-      context.fillText('Game Over - press SPACE to restart', canvas.width / 2, canvas.height / 2 - 60)
+      context.fillText('Game Over - press W to restart', canvas.width / 2, canvas.height / 2 - 60)
     }
   }
 
   function update(dt: number) {
     if (state === 'over') {
-      if (spaceDown && !spaceWasDown) reset()
-      spaceWasDown = spaceDown
+      if (keys.has('KeyW') && !wWasDown) reset()
       return
     }
 
-    if (spaceDown && !spaceWasDown && !hero.airborne) {
+    const wDown = keys.has('KeyW') || keys.has('ArrowUp')
+    const aDown = keys.has('KeyA') || keys.has('ArrowLeft')
+    const dDown = keys.has('KeyD') || keys.has('ArrowRight')
+
+    const runSpeed = RUN_SPEED
+    const targetVx = (dDown ? runSpeed : 0) - (aDown ? runSpeed : 0)
+    if (hero.airborne) {
+      const airControl = 2.5
+      hero.vx += (targetVx - hero.vx) * Math.min(1, airControl * dt)
+    } else {
+      hero.vx = targetVx
+    }
+    if (hero.vx > 0) hero.facing = 1
+    if (hero.vx < 0) hero.facing = -1
+
+    if (wDown && !wWasDown && !hero.airborne) {
       hero.vy = JUMP_VELOCITY
       hero.airborne = true
+      airTime = 0
     }
-    spaceWasDown = spaceDown
+    wWasDown = wDown
 
     const aimDx = mouseX - hero.x
     const aimDy = mouseY - hero.y
-    hero.angle = Math.atan2(aimDy, aimDx)
 
     shootCooldown -= dt
     if (mouseDown && shootCooldown <= 0) {
@@ -390,10 +428,13 @@ export function startGame() {
       if (p.life <= 0) particles.splice(i, 1)
     }
 
-      speed = BASE_SPEED + Math.min(MAX_SPEED_BONUS, distance * 0.006)
-      const dx = speed * dt
+      const prevX = hero.x
+      const half = 24
+      hero.x = Math.max(half, Math.min(canvas.width - half, hero.x + hero.vx * dt))
+      const dx = hero.x - prevX
 
       if (hero.airborne) {
+        airTime += dt
         hero.vy += GRAVITY * dt
         hero.y += hero.vy * dt
         if (hero.y >= restY) {
@@ -403,25 +444,29 @@ export function startGame() {
         }
       }
 
-      distance += dx
+      distance += Math.abs(dx)
       scrollX += dx
       starScroll += dx
+      animTime += dt
 
-      trailPts.push({ x: distance + hero.x, y: hero.y })
-      while (trailPts.length > 2 && trailPts[trailPts.length - 1].x - trailPts[0].x > TRAIL_LENGTH) {
-        trailPts.shift()
+      for (const tp of trailPts) tp.age += dt
+
+      const lastPt = trailPts[trailPts.length - 1]
+      if (!lastPt || Math.hypot(hero.x - lastPt.x, hero.y - lastPt.y) > 3) {
+        trailPts.push({ x: hero.x, y: hero.y, age: 0 })
       }
+      while (trailPts.length > 0 && trailPts[0].age > TRAIL_LIFETIME) trailPts.shift()
 
       spawnTimer -= dt
       if (spawnTimer <= 0) {
         spawnObstacle()
-        spawnTimer = rand(0.75, 1.45) * (BASE_SPEED / speed)
+        spawnTimer = rand(0.75, 1.45)
       }
 
       for (let i = obstacles.length - 1; i >= 0; i--) {
         const o = obstacles[i]
         o.x -= dx
-        if (o.x + o.w < -20) obstacles.splice(i, 1)
+        if (o.x + o.w < -20 || o.x > canvas.width + 20) obstacles.splice(i, 1)
       }
 
       for (const o of obstacles) {
