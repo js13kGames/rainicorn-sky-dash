@@ -1,4 +1,4 @@
-import unicornSheet from './assets/unicorn.png'
+import unicornSheet from './assets/unicorn.png?url&no-inline'
 
 const RAINBOW = ['#ff2d2d', '#ff8c00', '#ffd700', '#2ecc71', '#1e90ff', '#8b5cf6']
 const BAND_SPACING = 9
