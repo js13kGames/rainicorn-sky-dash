@@ -14,14 +14,20 @@ const RUN_FRAME_COUNT = 4
 const JUMP_FRAME_START = 4
 const JUMP_FRAME_COUNT = 6
 const IDLE_FRAME = 10
+const GROUND_FRAME = 12
+const CROSSHAIR_FRAME = 11
+const PLATFORM_FRAME = 13
+const PLATFORM_SOLID_FRAME = 14
+const PLATFORM_HIT_H = 14 * SPRITE_SCALE
 
 const GRAVITY = 2900
 const JUMP_VELOCITY = -1000
 const JUMP_DURATION = (2 * Math.abs(JUMP_VELOCITY)) / GRAVITY
+const GAME_DURATION = 60
 const HERO_RADIUS = 14
-const HERO_GROUND_GAP = 18
+const UNICORN_FOOT_OFFSET = 40
 
-type Obstacle = { x: number; y: number; w: number; h: number; color: string }
+type Platform = { x: number; y: number; w: number; h: number; solid: boolean }
 type TrailPt = { x: number; y: number; age: number }
 type Projectile = { x: number; y: number; vx: number; vy: number; life: number }
 type Particle = { x: number; y: number; vx: number; vy: number; life: number; color: string }
@@ -80,7 +86,7 @@ export function startGame() {
   canvas.addEventListener('contextmenu', (e) => e.preventDefault())
 
   const groundY = Math.floor(canvas.height * 0.72)
-  const restY = groundY - HERO_GROUND_GAP
+  const restY = groundY - UNICORN_FOOT_OFFSET
 
   const hero = {
     x: canvas.width / 2,
@@ -93,17 +99,32 @@ export function startGame() {
 
   let state: 'running' | 'over' = 'running'
   let distance = 0
+  let score = 0
+  let timeLeft = 60
   let scrollX = 0
-  let spawnTimer = 1.2
-  let colorIndex = 0
   let wWasDown = false
   let animTime = 0
   let airTime = 0
 
-  const obstacles: Obstacle[] = []
+  const platforms: Platform[] = []
   const trailPts: TrailPt[] = []
   const projectiles: Projectile[] = []
   const particles: Particle[] = []
+  
+  // Määritetään kiinteät Y-koordinaattikerrokset piirroksen tyyliin
+  const layerYs: number[] = []
+  let rightCursors: number[] = []
+  let leftCursors: number[] = []
+  const LAYER_SPACING_Y = 140
+  
+  for (let y = groundY - LAYER_SPACING_Y; y >= 90; y -= LAYER_SPACING_Y) {
+    layerYs.push(y)
+  }
+  // Varmistetaan että on ainakin yksi kerros, jos näyttö on tosi matala
+  if (layerYs.length === 0) layerYs.push(groundY - 140)
+
+  seedPlatforms()
+  
   let shootCooldown = 0
   const SHOOT_INTERVAL = 0.18
   const PROJECTILE_SPEED = 650
@@ -132,41 +153,69 @@ export function startGame() {
     return min + Math.random() * (max - min)
   }
 
-  function nextColor() {
-    return RAINBOW[colorIndex++ % RAINBOW.length]
+  function spawnLedge(x: number, y: number, count: number) {
+    const size = SPRITE_SIZE * SPRITE_SCALE
+    for (let i = 0; i < count; i++) {
+      platforms.push({ x: x + i * size, y, w: size, h: size, solid: false })
+    }
   }
 
-  function spawnObstacle() {
-    const x = canvas.width + 40
-    if (Math.random() < 0.35) {
-      const w = rand(24, 40)
-      const h = rand(30, 46)
-      obstacles.push({ x, y: groundY - h, w, h, color: nextColor() })
-      if (Math.random() < 0.5) {
-        const w2 = rand(24, 40)
-        const h2 = rand(30, 46)
-        obstacles.push({
-          x: x + w + 14,
-          y: groundY - h2,
-          w: w2,
-          h: h2,
-          color: nextColor(),
-        })
+  function spawnPlatformGroup() {
+    const size = SPRITE_SIZE * SPRITE_SCALE
+    for (let i = 0; i < layerYs.length; i++) {
+      // Tarkistetaan kunkin kerroksen kohdalla, tarvitaanko oikealle lisää tasoja
+      if (rightCursors[i] < scrollX + canvas.width + 800) {
+        if (Math.random() < 0.85) {
+          // Sallitaan lievä negatiivinen väli -> osa tasoista sulautuu toisiinsa
+          const gap = rand(-40, 160)
+          const startX = rightCursors[i] + gap
+          const count = 1 + Math.floor(Math.random() * 4) // 1-4 palikkaa vierekkäin
+          spawnLedge(startX, layerYs[i], count)
+          rightCursors[i] = startX + count * size
+        } else {
+          // Jätetään satunnaisesti isompi tyhjä aukko tähän kerrokseen
+          rightCursors[i] += rand(200, 450)
+        }
       }
-    } else {
-      const w = rand(16, 22)
-      const h = rand(58, 86)
-      obstacles.push({ x, y: groundY - h, w, h, color: nextColor() })
+    }
+  }
+
+  function spawnPlatformGroupLeft() {
+    const size = SPRITE_SIZE * SPRITE_SCALE
+    for (let i = 0; i < layerYs.length; i++) {
+      if (leftCursors[i] > scrollX - 800) {
+        if (Math.random() < 0.85) {
+          const gap = rand(-40, 160)
+          const count = 1 + Math.floor(Math.random() * 4)
+          const startX = leftCursors[i] - gap - (count * size)
+          spawnLedge(startX, layerYs[i], count)
+          leftCursors[i] = startX
+        } else {
+          leftCursors[i] -= rand(200, 450)
+        }
+      }
+    }
+  }
+
+  function seedPlatforms() {
+    const startX = -800
+    rightCursors = layerYs.map(() => startX)
+    leftCursors = layerYs.map(() => startX)
+
+    // Generoidaan tasoja riittävästi oikealle, jotta alku on täynnä
+    while (Math.min(...rightCursors) < canvas.width + 800) {
+      spawnPlatformGroup()
     }
   }
 
   function reset() {
     state = 'running'
     distance = 0
+    score = 0
+    timeLeft = GAME_DURATION
     scrollX = 0
-    spawnTimer = 1.2
-    colorIndex = 0
-    obstacles.length = 0
+    platforms.length = 0
+    seedPlatforms()
     projectiles.length = 0
     particles.length = 0
     shootCooldown = 0
@@ -288,40 +337,37 @@ export function startGame() {
   function renderCrosshair() {
     context.save()
     context.translate(mouseX, mouseY)
-    context.strokeStyle = 'rgba(255, 255, 255, 0.8)'
-    context.lineWidth = 2
-    const s = 12
-    const g = 4
-    context.beginPath()
-    context.moveTo(-s, 0); context.lineTo(-g, 0)
-    context.moveTo(g, 0); context.lineTo(s, 0)
-    context.moveTo(0, -s); context.lineTo(0, -g)
-    context.moveTo(0, g); context.lineTo(0, s)
-    context.stroke()
-    context.beginPath()
-    context.arc(0, 0, 3, 0, Math.PI * 2)
-    context.fillStyle = '#ff2d2d'
-    context.fill()
+    context.drawImage(
+      SPRITE,
+      CROSSHAIR_FRAME * SPRITE_SIZE,
+      0,
+      SPRITE_SIZE,
+      SPRITE_SIZE,
+      -SPRITE_SIZE / 2,
+      -SPRITE_SIZE / 2,
+      SPRITE_SIZE,
+      SPRITE_SIZE,
+    )
     context.restore()
   }
 
   function renderGround() {
-    context.strokeStyle = 'rgba(255, 255, 255, 0.28)'
-    context.lineWidth = 2
-    context.beginPath()
-    context.moveTo(0, groundY)
-    context.lineTo(canvas.width, groundY)
-    context.stroke()
-
-    context.strokeStyle = 'rgba(255, 255, 255, 0.12)'
-    context.lineWidth = 3
-    const spacing = 90
-    context.beginPath()
-    for (let tx = -(scrollX % spacing); tx < canvas.width; tx += spacing) {
-      context.moveTo(tx, groundY + 12)
-      context.lineTo(tx + 26, groundY + 12)
+    const tile = SPRITE_SIZE * SPRITE_SCALE
+    const startX = -(((scrollX % tile) + tile) % tile)
+    const cols = Math.ceil(canvas.width / tile) + 1
+    for (let c = 0; c < cols; c++) {
+      context.drawImage(
+        SPRITE,
+        GROUND_FRAME * SPRITE_SIZE,
+        0,
+        SPRITE_SIZE,
+        SPRITE_SIZE,
+        startX + c * tile,
+        groundY,
+        tile,
+        tile,
+      )
     }
-    context.stroke()
   }
 
   function drawHud() {
@@ -330,6 +376,16 @@ export function startGame() {
     context.font = 'bold 20px system-ui, sans-serif'
     context.fillStyle = 'rgba(255, 255, 255, 0.85)'
     context.fillText(`${Math.floor(distance / 10)} m`, 20, 18)
+    context.font = 'bold 16px system-ui, sans-serif'
+    context.fillStyle = 'rgba(255, 200, 60, 0.9)'
+    context.fillText(`\u2726 ${score}`, 20, 44)
+
+    context.textAlign = 'center'
+    context.textBaseline = 'top'
+    context.font = 'bold 22px system-ui, sans-serif'
+    context.fillStyle = 'rgba(255, 255, 255, 0.85)'
+    const t = Math.max(0, Math.ceil(timeLeft))
+    context.fillText(`${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`, canvas.width / 2, 18)
 
     context.textAlign = 'center'
     context.textBaseline = 'alphabetic'
@@ -338,15 +394,28 @@ export function startGame() {
     context.fillText('W jump \u00b7 A/D move \u00b7 Click shoot', canvas.width / 2, canvas.height - 16)
 
     if (state === 'over') {
-      context.font = 'bold 30px system-ui, sans-serif'
+      context.font = 'bold 34px system-ui, sans-serif'
       context.fillStyle = '#ffffff'
-      context.fillText('Game Over - press W to restart', canvas.width / 2, canvas.height / 2 - 60)
+      context.fillText('Game Over', canvas.width / 2, canvas.height / 2 - 80)
+      context.font = 'bold 24px system-ui, sans-serif'
+      context.fillStyle = 'rgba(255, 200, 60, 0.95)'
+      context.fillText(`Your score: ${score}`, canvas.width / 2, canvas.height / 2 - 32)
+      context.font = '16px system-ui, sans-serif'
+      context.fillStyle = 'rgba(255, 255, 255, 0.7)'
+      context.fillText('Press W to restart', canvas.width / 2, canvas.height / 2 + 12)
     }
   }
 
   function update(dt: number) {
     if (state === 'over') {
       if (keys.has('KeyW') && !wWasDown) reset()
+      return
+    }
+
+    timeLeft -= dt
+    if (timeLeft <= 0) {
+      timeLeft = 0
+      state = 'over'
       return
     }
 
@@ -395,24 +464,28 @@ export function startGame() {
       p.life -= dt
       if (p.life <= 0) { projectiles.splice(i, 1); continue }
 
-      for (let j = obstacles.length - 1; j >= 0; j--) {
-        const o = obstacles[j]
-        const cx = Math.max(o.x, Math.min(p.x, o.x + o.w))
-        const cy = Math.max(o.y, Math.min(p.y, o.y + o.h))
+      for (let k = platforms.length - 1; k >= 0; k--) {
+        const pl = platforms[k]
+        const sxp = pl.x - scrollX
+        const cx = Math.max(sxp, Math.min(p.x, sxp + pl.w))
+        const cy = Math.max(pl.y, Math.min(p.y, pl.y + PLATFORM_HIT_H))
         const ddx = p.x - cx
         const ddy = p.y - cy
         if (ddx * ddx + ddy * ddy < PROJECTILE_RADIUS * PROJECTILE_RADIUS) {
-          for (let k = 0; k < 12; k++) {
+          if (!pl.solid) score += 10
+          pl.solid = true
+          for (let b = 0; b < 14; b++) {
             const a = Math.random() * Math.PI * 2
             const sp = rand(80, 220)
             particles.push({
-              x: cx, y: cy,
-              vx: Math.cos(a) * sp, vy: Math.sin(a) * sp,
+              x: cx,
+              y: cy,
+              vx: Math.cos(a) * sp,
+              vy: Math.sin(a) * sp,
               life: rand(0.3, 0.7),
-              color: o.color,
+              color: RAINBOW[Math.floor(Math.random() * RAINBOW.length)],
             })
           }
-          obstacles.splice(j, 1)
           projectiles.splice(i, 1)
           break
         }
@@ -428,57 +501,88 @@ export function startGame() {
       if (p.life <= 0) particles.splice(i, 1)
     }
 
-      const prevX = hero.x
-      const half = 24
-      hero.x = Math.max(half, Math.min(canvas.width - half, hero.x + hero.vx * dt))
-      const dx = hero.x - prevX
+    const prevX = hero.x
+    const half = 24
+    hero.x = Math.max(half, Math.min(canvas.width - half, hero.x + hero.vx * dt))
+    const dx = hero.x - prevX
 
-      if (hero.airborne) {
-        airTime += dt
-        hero.vy += GRAVITY * dt
-        hero.y += hero.vy * dt
-        if (hero.y >= restY) {
-          hero.y = restY
+    if (hero.airborne) {
+      airTime += dt
+      hero.vy += GRAVITY * dt
+      const prevY = hero.y
+      hero.y += hero.vy * dt
+
+      for (const pl of platforms) {
+        if (!pl.solid) continue
+        const standY = pl.y - UNICORN_FOOT_OFFSET
+        const sxp = pl.x - scrollX
+        const overX =
+          hero.x + HERO_RADIUS >= sxp && hero.x - HERO_RADIUS <= sxp + pl.w
+        const crossing =
+          (prevY <= standY && hero.y >= standY) ||
+          (prevY > standY && hero.y <= standY)
+        if (overX && crossing) {
+          hero.y = standY
           hero.vy = 0
           hero.airborne = false
-        }
-      }
-
-      distance += Math.abs(dx)
-      scrollX += dx
-      starScroll += dx
-      animTime += dt
-
-      for (const tp of trailPts) tp.age += dt
-
-      const lastPt = trailPts[trailPts.length - 1]
-      if (!lastPt || Math.hypot(hero.x - lastPt.x, hero.y - lastPt.y) > 3) {
-        trailPts.push({ x: hero.x, y: hero.y, age: 0 })
-      }
-      while (trailPts.length > 0 && trailPts[0].age > TRAIL_LIFETIME) trailPts.shift()
-
-      spawnTimer -= dt
-      if (spawnTimer <= 0) {
-        spawnObstacle()
-        spawnTimer = rand(0.75, 1.45)
-      }
-
-      for (let i = obstacles.length - 1; i >= 0; i--) {
-        const o = obstacles[i]
-        o.x -= dx
-        if (o.x + o.w < -20 || o.x > canvas.width + 20) obstacles.splice(i, 1)
-      }
-
-      for (const o of obstacles) {
-        const nx = Math.max(o.x, Math.min(hero.x, o.x + o.w))
-        const ny = Math.max(o.y, Math.min(hero.y, o.y + o.h))
-        const ddx = hero.x - nx
-        const ddy = hero.y - ny
-        if (ddx * ddx + ddy * ddy < HERO_RADIUS * HERO_RADIUS) {
-          state = 'over'
           break
         }
       }
+
+      if (hero.y >= restY) {
+        hero.y = restY
+        hero.vy = 0
+        hero.airborne = false
+      }
+    } else {
+      let supported = hero.y >= restY
+      if (!supported) {
+        for (const pl of platforms) {
+          if (
+            pl.solid &&
+            Math.abs(hero.y - (pl.y - UNICORN_FOOT_OFFSET)) < 1 &&
+            hero.x + HERO_RADIUS >= pl.x - scrollX &&
+            hero.x - HERO_RADIUS <= pl.x - scrollX + pl.w
+          ) {
+            supported = true
+            break
+          }
+        }
+      }
+      if (!supported) {
+        hero.airborne = true
+        hero.vy = 0
+        airTime = 0
+      }
+    }
+
+    distance += Math.abs(dx)
+    scrollX += dx
+    starScroll += dx
+    animTime += dt
+
+    for (const tp of trailPts) tp.age += dt
+
+    const lastPt = trailPts[trailPts.length - 1]
+    if (!lastPt || Math.hypot(hero.x - lastPt.x, hero.y - lastPt.y) > 3) {
+      trailPts.push({ x: hero.x, y: hero.y, age: 0 })
+    }
+    while (trailPts.length > 0 && trailPts[0].age > TRAIL_LIFETIME) trailPts.shift()
+
+    // Luodaan uusia tasoja tiheästi pelaajan liikkuessa
+    while (Math.min(...rightCursors) < scrollX + canvas.width + 800) {
+      spawnPlatformGroup()
+    }
+    while (Math.max(...leftCursors) > scrollX - 800) {
+      spawnPlatformGroupLeft()
+    }
+
+    // Poistetaan näytön ulkopuolelle reilusti jääneet tasot
+    for (let i = platforms.length - 1; i >= 0; i--) {
+      const pl = platforms[i]
+      const sx = pl.x - scrollX
+      if (sx + pl.w < -1000 || sx > canvas.width + 1000) platforms.splice(i, 1)
+    }
   }
 
   function render() {
@@ -489,9 +593,19 @@ export function startGame() {
     drawTrail()
 
     renderGround()
-    for (const o of obstacles) {
-      context.fillStyle = o.color
-      context.fillRect(o.x, o.y, o.w, o.h)
+    for (const pl of platforms) {
+      const frame = pl.solid ? PLATFORM_SOLID_FRAME : PLATFORM_FRAME
+      context.drawImage(
+        SPRITE,
+        frame * SPRITE_SIZE,
+        0,
+        SPRITE_SIZE,
+        SPRITE_SIZE,
+        pl.x - scrollX,
+        pl.y,
+        pl.w,
+        pl.h,
+      )
     }
 
     for (const p of projectiles) {
