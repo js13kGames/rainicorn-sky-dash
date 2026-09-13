@@ -23,11 +23,11 @@ const PLATFORM_HIT_H = 14 * SPRITE_SCALE
 const GRAVITY = 2900
 const JUMP_VELOCITY = -1000
 const JUMP_DURATION = (2 * Math.abs(JUMP_VELOCITY)) / GRAVITY
-const GAME_DURATION = 60
+const GAME_DURATION = 15
 const HERO_RADIUS = 14
 const UNICORN_FOOT_OFFSET = 40
 
-type Platform = { x: number; y: number; w: number; h: number; solid: boolean }
+type Platform = { x: number; y: number; w: number; h: number; solid: number }
 type TrailPt = { x: number; y: number; age: number }
 type Projectile = { x: number; y: number; vx: number; vy: number; life: number }
 type Particle = { x: number; y: number; vx: number; vy: number; life: number; color: string }
@@ -100,7 +100,7 @@ export function startGame() {
   let state: 'running' | 'over' = 'running'
   let distance = 0
   let score = 0
-  let timeLeft = 60
+  let timeLeft = GAME_DURATION
   let scrollX = 0
   let wWasDown = false
   let animTime = 0
@@ -111,7 +111,6 @@ export function startGame() {
   const projectiles: Projectile[] = []
   const particles: Particle[] = []
   
-  // Määritetään kiinteät Y-koordinaattikerrokset piirroksen tyyliin
   const layerYs: number[] = []
   let rightCursors: number[] = []
   let leftCursors: number[] = []
@@ -120,7 +119,6 @@ export function startGame() {
   for (let y = groundY - LAYER_SPACING_Y; y >= 90; y -= LAYER_SPACING_Y) {
     layerYs.push(y)
   }
-  // Varmistetaan että on ainakin yksi kerros, jos näyttö on tosi matala
   if (layerYs.length === 0) layerYs.push(groundY - 140)
 
   seedPlatforms()
@@ -156,24 +154,21 @@ export function startGame() {
   function spawnLedge(x: number, y: number, count: number) {
     const size = SPRITE_SIZE * SPRITE_SCALE
     for (let i = 0; i < count; i++) {
-      platforms.push({ x: x + i * size, y, w: size, h: size, solid: false })
+      platforms.push({ x: x + i * size, y, w: size, h: size, solid: 0 })
     }
   }
 
   function spawnPlatformGroup() {
     const size = SPRITE_SIZE * SPRITE_SCALE
     for (let i = 0; i < layerYs.length; i++) {
-      // Tarkistetaan kunkin kerroksen kohdalla, tarvitaanko oikealle lisää tasoja
       if (rightCursors[i] < scrollX + canvas.width + 800) {
         if (Math.random() < 0.85) {
-          // Sallitaan lievä negatiivinen väli -> osa tasoista sulautuu toisiinsa
           const gap = rand(-40, 160)
           const startX = rightCursors[i] + gap
-          const count = 1 + Math.floor(Math.random() * 4) // 1-4 palikkaa vierekkäin
+          const count = 1 + Math.floor(Math.random() * 4)
           spawnLedge(startX, layerYs[i], count)
           rightCursors[i] = startX + count * size
         } else {
-          // Jätetään satunnaisesti isompi tyhjä aukko tähän kerrokseen
           rightCursors[i] += rand(200, 450)
         }
       }
@@ -202,7 +197,6 @@ export function startGame() {
     rightCursors = layerYs.map(() => startX)
     leftCursors = layerYs.map(() => startX)
 
-    // Generoidaan tasoja riittävästi oikealle, jotta alku on täynnä
     while (Math.min(...rightCursors) < canvas.width + 800) {
       spawnPlatformGroup()
     }
@@ -382,10 +376,30 @@ export function startGame() {
 
     context.textAlign = 'center'
     context.textBaseline = 'top'
-    context.font = 'bold 22px system-ui, sans-serif'
-    context.fillStyle = 'rgba(255, 255, 255, 0.85)'
-    const t = Math.max(0, Math.ceil(timeLeft))
-    context.fillText(`${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`, canvas.width / 2, 18)
+    const barW = 260
+    const barH = 10
+    const barX = canvas.width / 2 - barW / 2
+    const barY = 16
+    const frac = Math.max(0, Math.min(1, timeLeft / GAME_DURATION))
+    context.beginPath()
+    context.roundRect(barX, barY, barW, barH, barH / 2)
+    context.fillStyle = 'rgba(255, 255, 255, 0.18)'
+    context.fill()
+    if (frac > 0) {
+      const grad = context.createLinearGradient(barX, 0, barX + barW, 0)
+      if (hero.y >= restY) {
+        grad.addColorStop(0, '#ff2d2d')
+        grad.addColorStop(1, '#ff8c00')
+      } else {
+        for (let c = 0; c < RAINBOW.length; c++) {
+          grad.addColorStop(c / (RAINBOW.length - 1), RAINBOW[c])
+        }
+      }
+      context.beginPath()
+      context.roundRect(barX, barY, Math.max(barH, barW * frac), barH, barH / 2)
+      context.fillStyle = grad
+      context.fill()
+    }
 
     context.textAlign = 'center'
     context.textBaseline = 'alphabetic'
@@ -396,19 +410,22 @@ export function startGame() {
     if (state === 'over') {
       context.font = 'bold 34px system-ui, sans-serif'
       context.fillStyle = '#ffffff'
-      context.fillText('Game Over', canvas.width / 2, canvas.height / 2 - 80)
+      context.fillText('Game Over', canvas.width / 2, canvas.height / 2 - 88)
       context.font = 'bold 24px system-ui, sans-serif'
       context.fillStyle = 'rgba(255, 200, 60, 0.95)'
-      context.fillText(`Your score: ${score}`, canvas.width / 2, canvas.height / 2 - 32)
+      context.fillText(`Your score: ${score}`, canvas.width / 2, canvas.height / 2 - 38)
+      context.font = 'bold 22px system-ui, sans-serif'
+      context.fillStyle = 'rgba(255, 255, 255, 0.85)'
+      context.fillText(`Distance: ${Math.floor(distance / 10)} m`, canvas.width / 2, canvas.height / 2 + 2)
       context.font = '16px system-ui, sans-serif'
       context.fillStyle = 'rgba(255, 255, 255, 0.7)'
-      context.fillText('Press W to restart', canvas.width / 2, canvas.height / 2 + 12)
+      context.fillText('Press Space to restart', canvas.width / 2, canvas.height / 2 + 44)
     }
   }
 
   function update(dt: number) {
     if (state === 'over') {
-      if (keys.has('KeyW') && !wWasDown) reset()
+      if (keys.has('Space') && !wWasDown) reset()
       return
     }
 
@@ -472,19 +489,23 @@ export function startGame() {
         const ddx = p.x - cx
         const ddy = p.y - cy
         if (ddx * ddx + ddy * ddy < PROJECTILE_RADIUS * PROJECTILE_RADIUS) {
-          if (!pl.solid) score += 10
-          pl.solid = true
-          for (let b = 0; b < 14; b++) {
-            const a = Math.random() * Math.PI * 2
-            const sp = rand(80, 220)
-            particles.push({
-              x: cx,
-              y: cy,
-              vx: Math.cos(a) * sp,
-              vy: Math.sin(a) * sp,
-              life: rand(0.3, 0.7),
-              color: RAINBOW[Math.floor(Math.random() * RAINBOW.length)],
-            })
+          // Vain koskemattomia tasoja (0) voi ampua
+          if (pl.solid === 0) {
+            score += 10
+            timeLeft += 1.5 
+            pl.solid = 4.0 
+            for (let b = 0; b < 14; b++) {
+              const a = Math.random() * Math.PI * 2
+              const sp = rand(80, 220)
+              particles.push({
+                x: cx,
+                y: cy,
+                vx: Math.cos(a) * sp,
+                vy: Math.sin(a) * sp,
+                life: rand(0.3, 0.7),
+                color: RAINBOW[Math.floor(Math.random() * RAINBOW.length)],
+              })
+            }
           }
           projectiles.splice(i, 1)
           break
@@ -513,7 +534,7 @@ export function startGame() {
       hero.y += hero.vy * dt
 
       for (const pl of platforms) {
-        if (!pl.solid) continue
+        if (pl.solid <= 0) continue
         const standY = pl.y - UNICORN_FOOT_OFFSET
         const sxp = pl.x - scrollX
         const overX =
@@ -539,7 +560,7 @@ export function startGame() {
       if (!supported) {
         for (const pl of platforms) {
           if (
-            pl.solid &&
+            pl.solid > 0 &&
             Math.abs(hero.y - (pl.y - UNICORN_FOOT_OFFSET)) < 1 &&
             hero.x + HERO_RADIUS >= pl.x - scrollX &&
             hero.x - HERO_RADIUS <= pl.x - scrollX + pl.w
@@ -553,6 +574,8 @@ export function startGame() {
         hero.airborne = true
         hero.vy = 0
         airTime = 0
+      } else if (hero.y >= restY) {
+        timeLeft -= dt * 4 
       }
     }
 
@@ -569,7 +592,6 @@ export function startGame() {
     }
     while (trailPts.length > 0 && trailPts[0].age > TRAIL_LIFETIME) trailPts.shift()
 
-    // Luodaan uusia tasoja tiheästi pelaajan liikkuessa
     while (Math.min(...rightCursors) < scrollX + canvas.width + 800) {
       spawnPlatformGroup()
     }
@@ -577,9 +599,16 @@ export function startGame() {
       spawnPlatformGroupLeft()
     }
 
-    // Poistetaan näytön ulkopuolelle reilusti jääneet tasot
+    // Päivitetään tasojen ajastimia TAI TUHOTaan ne lopullisesti
     for (let i = platforms.length - 1; i >= 0; i--) {
       const pl = platforms[i]
+      if (pl.solid > 0) {
+        pl.solid -= dt
+        if (pl.solid <= 0) {
+          platforms.splice(i, 1) // Taso katoaa lopullisesti, tyhjyys jää!
+          continue
+        }
+      }
       const sx = pl.x - scrollX
       if (sx + pl.w < -1000 || sx > canvas.width + 1000) platforms.splice(i, 1)
     }
@@ -594,7 +623,9 @@ export function startGame() {
 
     renderGround()
     for (const pl of platforms) {
-      const frame = pl.solid ? PLATFORM_SOLID_FRAME : PLATFORM_FRAME
+      const isBlinking = pl.solid > 0 && pl.solid < 1 && Math.floor(pl.solid * 15) % 2 === 0
+      const frame = (pl.solid > 0 && !isBlinking) ? PLATFORM_SOLID_FRAME : PLATFORM_FRAME
+      
       context.drawImage(
         SPRITE,
         frame * SPRITE_SIZE,
