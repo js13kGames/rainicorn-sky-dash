@@ -57,11 +57,44 @@ export function startGame() {
 
   const context = canvas.getContext('2d')!
 
+  // --- AUDIO API SETUP ---
+  let audioCtx: AudioContext | null = null
+
+  function initAudio() {
+    if (!audioCtx) {
+      audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)()
+    } else if (audioCtx.state === 'suspended') {
+      audioCtx.resume()
+    }
+  }
+
+  function playSound(type: OscillatorType, startFreq: number, endFreq: number, duration: number, vol: number) {
+    if (!audioCtx) return
+    const osc = audioCtx.createOscillator()
+    const gain = audioCtx.createGain()
+    osc.connect(gain)
+    gain.connect(audioCtx.destination)
+
+    osc.type = type
+    const now = audioCtx.currentTime
+    osc.frequency.setValueAtTime(startFreq, now)
+    osc.frequency.exponentialRampToValueAtTime(endFreq, now + duration)
+    
+    gain.gain.setValueAtTime(vol, now)
+    gain.gain.exponentialRampToValueAtTime(0.01, now + duration) // Äänen voimakkuus hiipuu nopeasti
+
+    osc.start(now)
+    osc.stop(now + duration)
+  }
+  // -----------------------
+
   let keys = new Set<string>()
   let mouseDown = false
   let mouseX = canvas.width / 2
   let mouseY = canvas.height / 2
+  
   addEventListener('keydown', (e) => {
+    initAudio() // Selaimet vaativat käyttäjän interaktion ennen äänen toistamista
     keys.add(e.code)
     if (e.code === 'KeyW' || e.code === 'ArrowUp') e.preventDefault()
   })
@@ -78,6 +111,7 @@ export function startGame() {
     mouseY = e.clientY
   })
   canvas.addEventListener('mousedown', (e) => {
+    initAudio() // Äänet sallitaan myös hiiren painalluksesta
     if (e.button === 0) mouseDown = true
   })
   canvas.addEventListener('mouseup', (e) => {
@@ -455,6 +489,8 @@ export function startGame() {
       hero.vy = JUMP_VELOCITY
       hero.airborne = true
       airTime = 0
+      // Soitetaan hyppy-ääni (matalasta korkeaan 'boing')
+      playSound('sine', 300, 700, 0.2, 0.2)
     }
     wWasDown = wDown
 
@@ -472,6 +508,8 @@ export function startGame() {
         vy: Math.sin(a) * PROJECTILE_SPEED,
         life: 1.2,
       })
+      // Soitetaan ammuksen ääni (korkeasta matalaan 'pew')
+      playSound('square', 800, 150, 0.1, 0.05)
     }
 
     for (let i = projectiles.length - 1; i >= 0; i--) {
@@ -491,6 +529,9 @@ export function startGame() {
         if (ddx * ddx + ddy * ddy < PROJECTILE_RADIUS * PROJECTILE_RADIUS) {
           // Vain koskemattomia tasoja (0) voi ampua
           if (pl.solid === 0) {
+            // Soitetaan osumaääni tasoon osuessa
+            playSound('sawtooth', 150, 40, 0.15, 0.1)
+
             score += 10
             timeLeft += 1.5 
             pl.solid = 4.0 
